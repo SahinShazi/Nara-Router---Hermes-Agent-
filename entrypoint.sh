@@ -7,8 +7,8 @@ mkdir -p /root/.hermes
 # ক্রেডেনশিয়াল (Render Environment Variables থেকে আসবে, না পেলে ডিফল্ট ভ্যালু নেবে)
 # ==============================================================================
 NARA_KEY="sk-nry-tiuhRyGoiENeKENnFOQRqFJxzls1Aw095yUxF96rvyw"
-BOT_TOKEN="8985281274:AAFliavGKcG1tLJR9bMztYva_7qwEdRliwc"
-ALLOWED_USERS="${TELEGRAM_ALLOWED_USERS:-7211392040}"
+BOT_TOKEN=8837922756:"AAFAEEPXSjorWbDi87hU-hhHZl9UHQlbISQ"
+ALLOWED_USERS="7211392040"
 
 clean() {
   echo "$1" | tr -d '\r' | xargs
