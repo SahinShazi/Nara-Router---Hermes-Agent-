@@ -4,26 +4,31 @@ set -euo pipefail
 mkdir -p /root/.hermes
 
 # ==============================================================================
-# ক্রেডেনশিয়াল (Render Environment Variables থেকে আসবে, না পেলে ডিফল্ট ভ্যালু নেবে)
+# ক্রেডেনশিয়াল (Render Environment Variables থেকে আসবে, না পেলে খালি ভ্যালু নেবে)
 # ==============================================================================
-NARA_KEY="${NARA_API_KEY}"
-BOT_TOKEN="${TELEGRAM_BOT_TOKEN}"
-ALLOWED_USERS="${TELEGRAM_ALLOWED_USERS}"
+NARA_KEY="${NARA_API_KEY:-}"
+BOT_TOKEN="${TELEGRAM_BOT_TOKEN:-}"
+ALLOWED_USERS="${TELEGRAM_ALLOWED_USERS:-}"
 
 clean() {
   echo "$1" | tr -d '\r' | xargs
 }
 
+# ক্লিনড ভ্যালুগুলো সরাসরি সিস্টেমে এক্সপোর্ট করা হচ্ছে (নিশ্চিত কার্যকারিতার জন্য)
+export NARA_API_KEY="$(clean "$NARA_KEY")"
+export TELEGRAM_BOT_TOKEN="$(clean "$BOT_TOKEN")"
+export TELEGRAM_ALLOWED_USERS="$(clean "$ALLOWED_USERS")"
+
 # .env ফাইলে ক্রেডেনশিয়াল রাইট করা হচ্ছে
 {
-  echo "NARA_API_KEY=$(clean "$NARA_KEY")"
-  echo "TELEGRAM_BOT_TOKEN=$(clean "$BOT_TOKEN")"
-  echo "TELEGRAM_ALLOWED_USERS=$(clean "$ALLOWED_USERS")"
+  echo "NARA_API_KEY=${NARA_API_KEY}"
+  echo "TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}"
+  echo "TELEGRAM_ALLOWED_USERS=${TELEGRAM_ALLOWED_USERS}"
 } > /root/.hermes/.env
 
 chmod 600 /root/.hermes/.env
 
-# NaraRouter কে কাস্টম প্রোভাইডার হিসেবে সেট করা হচ্ছে
+# NaraRouter কে আপনার লোকাল পাইথন স্ক্রিপ্টের কনফিগারেশন অনুযায়ী সেট করা হচ্ছে
 cat <<EOF > /root/.hermes/config.yaml
 model:
   default: "claude-haiku-4.5"
@@ -31,7 +36,7 @@ model:
 
 custom_providers:
   - name: nara
-    base_url: https://router.naraya.ai/v1
+    base_url: https://router.bynara.id/v1
     key_env: NARA_API_KEY
     api_mode: chat_completions
 EOF
