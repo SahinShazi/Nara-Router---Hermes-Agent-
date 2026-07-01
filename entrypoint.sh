@@ -28,7 +28,7 @@ export TELEGRAM_ALLOWED_USERS="$(clean "$ALLOWED_USERS")"
 
 chmod 600 /root/.hermes/.env
 
-# NaraRouter কে আপনার লোকাল পাইথন স্ক্রিপ্টের কনফিগারেশন অনুযায়ী সেট করা হচ্ছে
+# NaraRouter কে আপনার লোকাল পাইথন স্ক্রিপ্টের কনফিগারেশন অনুযায়ী এবং সমাধান ১ সহ সেট করা হচ্ছে
 cat <<EOF > /root/.hermes/config.yaml
 model:
   default: "claude-haiku-4.5"
@@ -39,6 +39,10 @@ custom_providers:
     base_url: https://router.bynara.id/v1
     key_env: NARA_API_KEY
     api_mode: chat_completions
+
+agent:
+  api_max_retries: 6          # রিকোয়েস্ট ফেইল বা লিমিট ওভার হলে মোট ৬ বার পুনরায় চেষ্টা করবে
+  retry_backoff_base: 10.0    # প্রথম রিট্রাইয়ের বিরতি ১০ সেকেন্ড এবং পরবর্তীতে তা গুণিতক হারে বাড়বে (Exponential Backoff)
 EOF
 
 # রেন্ডার পোর্টের জন্য ডামি এইচটিটিপি সার্ভার ব্যাকগ্রাউন্ডে চালু করা হচ্ছে
