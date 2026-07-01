@@ -3,9 +3,28 @@ set -euo pipefail
 
 mkdir -p /root/.hermes
 
-# ==============================================================================
-# ক্রেডেনশিয়াল (Render Environment Variables থেকে আসবে, না পেলে খালি ভ্যালু নেবে)
-# ==============================================================================
+SUPABASE_URL="${SUPABASE_URL:-}"
+SUPABASE_KEY="${SUPABASE_KEY:-}"
+
+# 1. Restore state from Supabase if credentials exist
+if [ -n "${SUPABASE_URL}" ] && [ -n "${SUPABASE_KEY}" ]; then
+  echo "Checking Supabase backup..."
+  HTTP_STATUS=$(curl -s -o /tmp/state.zip -w "%{http_code}" \
+    -H "apikey: ${SUPABASE_KEY}" \
+    -H "Authorization: Bearer ${SUPABASE_KEY}" \
+    "${SUPABASE_URL}/storage/v1/object/authenticated/hermes/state.zip")
+
+  if [ "$HTTP_STATUS" -eq 200 ] && [ -f /tmp/state.zip ]; then
+    echo "Restoring state..."
+    python3 -c "import shutil; shutil.unpack_archive('/tmp/state.zip', '/root/.hermes')"
+    rm -f /tmp/state.zip
+  else
+    echo "No backup found (HTTP ${HTTP_STATUS}). Starting fresh."
+    rm -f /tmp/state.zip
+  fi
+fi
+
+# 2. Setup local credentials
 NARA_KEY="${NARA_API_KEY:-}"
 BOT_TOKEN="${TELEGRAM_BOT_TOKEN:-}"
 ALLOWED_USERS="${TELEGRAM_ALLOWED_USERS:-}"
@@ -14,12 +33,10 @@ clean() {
   echo "$1" | tr -d '\r' | xargs
 }
 
-# ক্লিনড ভ্যালুগুলো সরাসরি সিস্টেমে এক্সপোর্ট করা হচ্ছে (নিশ্চিত কার্যকারিতার জন্য)
 export NARA_API_KEY="$(clean "$NARA_KEY")"
 export TELEGRAM_BOT_TOKEN="$(clean "$BOT_TOKEN")"
 export TELEGRAM_ALLOWED_USERS="$(clean "$ALLOWED_USERS")"
 
-# .env ফাইলে ক্রেডেনশিয়াল রাইট করা হচ্ছে
 {
   echo "NARA_API_KEY=${NARA_API_KEY}"
   echo "TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}"
@@ -28,7 +45,7 @@ export TELEGRAM_ALLOWED_USERS="$(clean "$ALLOWED_USERS")"
 
 chmod 600 /root/.hermes/.env
 
-# NaraRouter কে আপনার লোকাল পাইথন স্ক্রিপ্টের কনফিগারেশন অনুযায়ী এবং সমাধান ১ সহ সেট করা হচ্ছে
+# 3. Create config.yaml
 cat <<EOF > /root/.hermes/config.yaml
 model:
   default: "claude-sonnet-4.5"
@@ -41,15 +58,36 @@ custom_providers:
     api_mode: chat_completions
 
 agent:
-  api_max_retries: 6          # রিকোয়েস্ট ফেইল বা লিমিট ওভার হলে মোট ৬ বার পুনরায় চেষ্টা করবে
-  retry_backoff_base: 10.0    # প্রথম রিট্রাইয়ের বিরতি ১০ সেকেন্ড এবং পরবর্তীতে তা গুণিতক হারে বাড়বে (Exponential Backoff)
+  api_max_retries: 6
+  retry_backoff_base: 10.0
 EOF
 
-# রেন্ডার পোর্টের জন্য ডামি এইচটিটিপি সার্ভার ব্যাকগ্রাউন্ডে চালু করা হচ্ছে
+# 4. Background backup loop (Runs every 30 seconds)
+backup_loop() {
+  while true; do
+    sleep 30
+    if [ -d /root/.hermes ] && [ -f /root/.hermes/state.db ]; then
+      python3 -c "import shutil; shutil.make_archive('/tmp/state', 'zip', '/root/.hermes')"
+      
+      curl -s -o /dev/null -X POST \
+        -H "apikey: ${SUPABASE_KEY}" \
+        -H "Authorization: Bearer ${SUPABASE_KEY}" \
+        -H "Content-Type: application/zip" \
+        -H "x-upsert: true" \
+        --data-binary "@/tmp/state.zip" \
+        "${SUPABASE_URL}/storage/v1/object/hermes/state.zip"
+        
+      rm -f /tmp/state.zip
+    fi
+  done
+}
+
+if [ -n "${SUPABASE_URL}" ] && [ -n "${SUPABASE_KEY}" ]; then
+  backup_loop &
+fi
+
+# 5. Start services
 PORT="${PORT:-8000}"
-echo "Starting dummy HTTP server on port $PORT..."
 python3 -m http.server "$PORT" &
 
-# Hermes গেটওয়ে রান করা হচ্ছে
-echo "Starting Hermes Gateway..."
 exec /usr/local/bin/hermes gateway run
