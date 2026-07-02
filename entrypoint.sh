@@ -98,7 +98,7 @@ backup_loop() {
         -H "Content-Type: application/zip" \
         -H "x-upsert: true" \
         --data-binary "@/tmp/state.zip" \
-        "${SUPABASE_URL}/storage/v1/object/hermes/state.zip")
+        "${SUPABASE_URL}/storage/v1/object/hermes/state.zip"
         
       rm -f /tmp/state.zip
     fi
