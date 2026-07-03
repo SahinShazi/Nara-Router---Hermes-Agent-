@@ -24,13 +24,7 @@ if [ -n "${SUPABASE_URL}" ] && [ -n "${SUPABASE_KEY}" ]; then
   fi
 fi
 
-# 2. Setup environment variables and cleanup (Supports up to 6 keys)
-OPENROUTER_API_KEY_1="${OPENROUTER_API_KEY_1:-}"
-OPENROUTER_API_KEY_2="${OPENROUTER_API_KEY_2:-}"
-OPENROUTER_API_KEY_3="${OPENROUTER_API_KEY_3:-}"
-OPENROUTER_API_KEY_4="${OPENROUTER_API_KEY_4:-}"
-OPENROUTER_API_KEY_5="${OPENROUTER_API_KEY_5:-}"
-OPENROUTER_API_KEY_6="${OPENROUTER_API_KEY_6:-}"
+# 2. Setup environment variables and cleanup for Telegram
 TELEGRAM_BOT_TOKEN="${TELEGRAM_BOT_TOKEN:-}"
 TELEGRAM_ALLOWED_USERS="${TELEGRAM_ALLOWED_USERS:-}"
 
@@ -41,14 +35,7 @@ clean() {
 export TELEGRAM_BOT_TOKEN="$(clean "$TELEGRAM_BOT_TOKEN")"
 export TELEGRAM_ALLOWED_USERS="$(clean "$TELEGRAM_ALLOWED_USERS")"
 
-export OPENROUTER_API_KEY_1="$(clean "$OPENROUTER_API_KEY_1")"
-export OPENROUTER_API_KEY_2="$(clean "$OPENROUTER_API_KEY_2")"
-export OPENROUTER_API_KEY_3="$(clean "$OPENROUTER_API_KEY_3")"
-export OPENROUTER_API_KEY_4="$(clean "$OPENROUTER_API_KEY_4")"
-export OPENROUTER_API_KEY_5="$(clean "$OPENROUTER_API_KEY_5")"
-export OPENROUTER_API_KEY_6="$(clean "$OPENROUTER_API_KEY_6")"
-
-# 3. Create the custom lightweight Python proxy script (No extra pip packages needed!)
+# 3. Create the custom Python proxy with DYNAMIC Environment Scanning
 cat <<'EOF' > /root/proxy.py
 import http.server
 import urllib.request
@@ -57,20 +44,34 @@ import json
 import os
 import sys
 
-keys = [
-    os.environ.get("OPENROUTER_API_KEY_1", "").strip(),
-    os.environ.get("OPENROUTER_API_KEY_2", "").strip(),
-    os.environ.get("OPENROUTER_API_KEY_3", "").strip(),
-    os.environ.get("OPENROUTER_API_KEY_4", "").strip(),
-    os.environ.get("OPENROUTER_API_KEY_5", "").strip(),
-    os.environ.get("OPENROUTER_API_KEY_6", "").strip()
-]
-active_keys = [k for k in keys if k]
+# Dynamically scan all environment variables starting with "OPENROUTER_API_KEY_"
+env_keys = {}
+for env_name, env_val in os.environ.items():
+    if env_name.startswith("OPENROUTER_API_KEY_"):
+        val_clean = env_val.replace("\r", "").strip()
+        if val_clean:
+            try:
+                # Extract index number to sort keys sequentially (e.g. 1, 2, 3...)
+                index = int(env_name.replace("OPENROUTER_API_KEY_", ""))
+                env_keys[index] = val_clean
+            except ValueError:
+                # Fallback in case of a non-numeric suffix
+                env_keys[env_name] = val_clean
+
+# Sort and compile active keys list
+sorted_indices = sorted([k for k in env_keys.keys() if isinstance(k, int)])
+active_keys = [env_keys[idx] for idx in sorted_indices]
+
+# Add any non-numeric custom keys if present
+for k, v in env_keys.items():
+    if not isinstance(k, int):
+        active_keys.append(v)
 
 if not active_keys:
-    print("Error: No active OpenRouter keys found in environment!")
+    print("Error: No active OpenRouter keys (OPENROUTER_API_KEY_*) found in environment!")
     sys.exit(1)
 
+print(f"Custom Proxy initialized with {len(active_keys)} active OpenRouter keys in pool.")
 current_key_index = 0
 
 class OpenRouterProxyHandler(http.server.BaseHTTPRequestHandler):
