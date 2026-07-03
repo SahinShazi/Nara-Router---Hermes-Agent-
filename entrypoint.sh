@@ -25,8 +25,8 @@ if [ -n "${SUPABASE_URL}" ] && [ -n "${SUPABASE_KEY}" ]; then
 fi
 
 # 2. Setup environment variables and cleanup
-AGENTROUTER_API_KEY_PRIMARY="${AGENTROUTER_API_KEY_PRIMARY:-}"
-AGENTROUTER_API_KEY_SECONDARY="${AGENTROUTER_API_KEY_SECONDARY:-}"
+NARA_API_KEY_PRIMARY="${NARA_API_KEY_PRIMARY:-}"
+NARA_API_KEY_SECONDARY="${NARA_API_KEY_SECONDARY:-}"
 TELEGRAM_BOT_TOKEN="${TELEGRAM_BOT_TOKEN:-}"
 TELEGRAM_ALLOWED_USERS="${TELEGRAM_ALLOWED_USERS:-}"
 
@@ -36,15 +36,14 @@ clean() {
 
 export TELEGRAM_BOT_TOKEN="$(clean "$TELEGRAM_BOT_TOKEN")"
 export TELEGRAM_ALLOWED_USERS="$(clean "$TELEGRAM_ALLOWED_USERS")"
-export AGENTROUTER_API_KEY_PRIMARY="$(clean "$AGENTROUTER_API_KEY_PRIMARY")"
-export AGENTROUTER_API_KEY_SECONDARY="$(clean "$AGENTROUTER_API_KEY_SECONDARY")"
+export NARA_API_KEY_PRIMARY="$(clean "$NARA_API_KEY_PRIMARY")"
+export NARA_API_KEY_SECONDARY="$(clean "$NARA_API_KEY_SECONDARY")"
 
-# Function to write active key to .env and export it
+# Function to write active key to .env
 write_env() {
   local active_key="$1"
-  export AGENTROUTER_API_KEY="${active_key}"
   {
-    echo "AGENTROUTER_API_KEY=${active_key}"
+    echo "NARA_API_KEY=${active_key}"
     echo "TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}"
     echo "TELEGRAM_ALLOWED_USERS=${TELEGRAM_ALLOWED_USERS}"
   } > /root/.hermes/.env
@@ -56,34 +55,34 @@ HOUR=$(date +%H)
 HOUR_INT=$((10#$HOUR))
 
 if [ $HOUR_INT -ge 6 ] && [ $HOUR_INT -lt 12 ]; then
-  ACTIVE_KEY="$AGENTROUTER_API_KEY_PRIMARY"
+  ACTIVE_KEY="$NARA_API_KEY_PRIMARY"
   ACTIVE_NAME="PRIMARY"
 else
-  ACTIVE_KEY="${AGENTROUTER_API_KEY_SECONDARY:-}"
+  ACTIVE_KEY="${NARA_API_KEY_SECONDARY:-}"
   ACTIVE_NAME="SECONDARY"
   if [ -z "$ACTIVE_KEY" ]; then
-    ACTIVE_KEY="$AGENTROUTER_API_KEY_PRIMARY"
+    ACTIVE_KEY="$NARA_API_KEY_PRIMARY"
     ACTIVE_NAME="PRIMARY"
   fi
 fi
 
 write_env "$ACTIVE_KEY"
 
-# 4. Create config.yaml utilizing native OpenAI-compatible custom provider
+# 4. Create config.yaml with fast failure detection and NO fallback models
 cat <<EOF > /root/.hermes/config.yaml
 model:
-  default: "claude-opus-4-8"
-  provider: "agentrouter"
+  default: "claude-sonnet-4.5"
+  provider: "nara"
 
 custom_providers:
-  - name: agentrouter
-    base_url: https://agentrouter.org/v1
-    key_env: AGENTROUTER_API_KEY
+  - name: nara
+    base_url: https://router.bynara.id/v1
+    key_env: NARA_API_KEY
     api_mode: chat_completions
 
 agent:
-  api_max_retries: 2
-  retry_backoff_base: 5.0
+  api_max_retries: 2          # limits retries to only 2 attempts on failure
+  retry_backoff_base: 5.0     # waits only 5 seconds before retrying (fails fast)
 EOF
 
 # 5. Background loop to sync backup to Supabase
@@ -107,6 +106,7 @@ backup_loop() {
 }
 
 # 6. Background loop to check time and rotate keys (Checks every 5 minutes)
+GATEWAY_PID=""
 key_rotator_loop() {
   local current_active_name="$1"
   
@@ -119,13 +119,13 @@ key_rotator_loop() {
     local target_name=""
     
     if [ $hour_int -ge 6 ] && [ $hour_int -lt 12 ]; then
-      target_key="$AGENTROUTER_API_KEY_PRIMARY"
+      target_key="$NARA_API_KEY_PRIMARY"
       target_name="PRIMARY"
     else
-      target_key="$AGENTROUTER_API_KEY_SECONDARY"
+      target_key="$NARA_API_KEY_SECONDARY"
       target_name="SECONDARY"
       if [ -z "$target_key" ]; then
-        target_key="$AGENTROUTER_API_KEY_PRIMARY"
+        target_key="$NARA_API_KEY_PRIMARY"
         target_name="PRIMARY"
       fi
     fi
@@ -135,8 +135,9 @@ key_rotator_loop() {
       write_env "$target_key"
       current_active_name="$target_name"
       
-      # Restart the gateway gracefully to load new env without conflicts
-      /usr/local/bin/hermes gateway restart || true
+      if [ -n "$GATEWAY_PID" ]; then
+        kill "$GATEWAY_PID" || true
+      fi
     fi
   done
 }
@@ -148,10 +149,14 @@ fi
 
 key_rotator_loop "$ACTIVE_NAME" &
 
-# 7. Start web server
+# 7. Start web server and run Gateway process in a self-healing loop
 PORT="${PORT:-8000}"
 python3 -m http.server "$PORT" &
 
-# 8. Start Gateway in foreground (Ensures background jobs survive)
-echo "Starting Hermes Gateway..."
-/usr/local/bin/hermes gateway run
+while true; do
+  echo "Starting Hermes Gateway..."
+  /usr/local/bin/hermes gateway run &
+  GATEWAY_PID=$!
+  wait $GATEWAY_PID || true
+  sleep 2
+done
