@@ -39,7 +39,7 @@ clean() {
 }
 
 export TELEGRAM_BOT_TOKEN="$(clean "$TELEGRAM_BOT_TOKEN")"
-export TELEGRAM_ALLOWED_USERS="$(clean "$TELEGRAM_ALLOWED_USERS")"
+export TELEGRAM_ALLOWED_USERS="$(clean "$ALLOWED_USERS")"
 
 export KEY_1="$(clean "$OPENROUTER_API_KEY_1")"
 export KEY_2="$(clean "$OPENROUTER_API_KEY_2")"
@@ -142,13 +142,15 @@ if [ -n "${SUPABASE_URL}" ] && [ -n "${SUPABASE_KEY}" ]; then
   backup_loop &
 fi
 
-# 8. Start LiteLLM proxy server on local port 8001
+# 8. Start LiteLLM proxy on local port 8001 (Highly Optimized for RAM usage)
 echo "Starting LiteLLM proxy..."
-litellm --config /root/litellm_config.yaml --port 8001 --host 127.0.0.1 &
+export LITELLM_TELEMETRY=False
+export DISABLE_LITELLM_TELEMETRY=True
+litellm --config /root/litellm_config.yaml --port 8001 --host 127.0.0.1 --num_workers 1 &
 
-# 9. Start web server
+# 9. Start web server explicitly bound to 0.0.0.0 for Render's external health scanner
 PORT="${PORT:-8000}"
-python3 -m http.server "$PORT" &
+python3 -m http.server --bind 0.0.0.0 "$PORT" &
 
 # 10. Start Gateway in foreground (Ensures background jobs survive)
 echo "Starting Hermes Gateway..."
