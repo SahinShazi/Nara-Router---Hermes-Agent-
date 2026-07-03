@@ -2,6 +2,8 @@
 set -euo pipefail
 
 mkdir -p /root/.hermes
+mkdir -p /root/.pi/agent/extensions
+mkdir -p /root/.hermes/extensions
 
 SUPABASE_URL="${SUPABASE_URL:-}"
 SUPABASE_KEY="${SUPABASE_KEY:-}"
@@ -39,9 +41,10 @@ export TELEGRAM_ALLOWED_USERS="$(clean "$TELEGRAM_ALLOWED_USERS")"
 export AGENTROUTER_API_KEY_PRIMARY="$(clean "$AGENTROUTER_API_KEY_PRIMARY")"
 export AGENTROUTER_API_KEY_SECONDARY="$(clean "$AGENTROUTER_API_KEY_SECONDARY")"
 
-# Function to write active key to .env
+# Function to write active key to .env and export to environment for TS extensions
 write_env() {
   local active_key="$1"
+  export AGENTROUTER_API_KEY="${active_key}"
   {
     echo "AGENTROUTER_API_KEY=${active_key}"
     echo "TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}"
@@ -68,24 +71,92 @@ fi
 
 write_env "$ACTIVE_KEY"
 
-# 4. Create config.yaml with AgentRouter settings based on your active models
+# 4. Create custom provider extensions based on official documentation
+cat <<'EOF' > /root/.pi/agent/extensions/agentrouter-claude.ts
+export default function (pi: ExtensionAPI) {
+  pi.registerProvider("agentrouter-claude", {
+    name: "AgentRouter Claude",
+    baseUrl: "https://agentrouter.org",
+    apiKey: process.env.AGENTROUTER_API_KEY || "",
+    api: "anthropic-messages",
+    models: [
+      {
+        id: "claude-opus-4-8",
+        name: "Claude Opus 4.8 via AgentRouter",
+        reasoning: false,
+        input: ["text"],
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+        contextWindow: 1000000,
+        maxTokens: 8192
+      },
+      {
+        id: "claude-opus-4-7",
+        name: "Claude Opus 4.7 via AgentRouter",
+        reasoning: false,
+        input: ["text"],
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+        contextWindow: 1000000,
+        maxTokens: 8192
+      },
+      {
+        id: "claude-opus-4-6",
+        name: "Claude Opus 4.6 via AgentRouter",
+        reasoning: false,
+        input: ["text"],
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+        contextWindow: 1000000,
+        maxTokens: 8192
+      }
+    ]
+  });
+}
+EOF
+cp /root/.pi/agent/extensions/agentrouter-claude.ts /root/.hermes/extensions/agentrouter-claude.ts
+
+cat <<'EOF' > /root/.pi/agent/extensions/agentrouter-openai.ts
+export default function (pi: ExtensionAPI) {
+  pi.registerProvider("agentrouter-openai", {
+    name: "AgentRouter openai",
+    baseUrl: "https://agentrouter.org/v1",
+    apiKey: process.env.AGENTROUTER_API_KEY || "",
+    api: "OpenAI Compatible",
+    models: [
+      {
+        id: "gpt-5.5",
+        name: "GPT-5.5",
+        reasoning: false,
+        input: ["text"],
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+        contextWindow: 1000000,
+        maxTokens: 8192
+      },
+      {
+        id: "glm-5.2",
+        name: "GLM-5.2",
+        reasoning: false,
+        input: ["text"],
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+        contextWindow: 1000000,
+        maxTokens: 8192
+      }
+    ]
+  });
+}
+EOF
+cp /root/.pi/agent/extensions/agentrouter-openai.ts /root/.hermes/extensions/agentrouter-openai.ts
+
+# 5. Create config.yaml utilizing the custom provider extensions
 cat <<EOF > /root/.hermes/config.yaml
 model:
   default: "claude-opus-4-8"
-  provider: "agentrouter"
-
-custom_providers:
-  - name: agentrouter
-    base_url: https://agentrouter.org/v1
-    key_env: AGENTROUTER_API_KEY
-    api_mode: chat_completions
+  provider: "agentrouter-claude"
 
 agent:
   api_max_retries: 2
   retry_backoff_base: 5.0
 EOF
 
-# 5. Background loop to sync backup to Supabase
+# 6. Background loop to sync backup to Supabase
 backup_loop() {
   while true; do
     sleep 30
@@ -105,7 +176,7 @@ backup_loop() {
   done
 }
 
-# 6. Background loop to check time and rotate keys (Checks every 5 minutes)
+# 7. Background loop to check time and rotate keys (Checks every 5 minutes)
 GATEWAY_PID=""
 key_rotator_loop() {
   local current_active_name="$1"
@@ -149,7 +220,7 @@ fi
 
 key_rotator_loop "$ACTIVE_NAME" &
 
-# 7. Start web server and run Gateway process in a self-healing loop
+# 8. Start web server and run Gateway process in a self-healing loop
 PORT="${PORT:-8000}"
 python3 -m http.server "$PORT" &
 
