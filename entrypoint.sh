@@ -37,7 +37,7 @@ export TELEGRAM_BOT_TOKEN="$(clean "$TELEGRAM_BOT_TOKEN")"
 export TELEGRAM_ALLOWED_USERS="$(clean "$TELEGRAM_ALLOWED_USERS")"
 export GITHUB_TOKEN="$(clean "$GITHUB_TOKEN")"
 
-# 3. Create the custom Python proxy with Dynamic Key Scanning, User-Agent bypass, and Context Truncation (8k Limit Fix)
+# 3. Create the custom Python proxy with Dynamic Key Scanning, User-Agent bypass, and Double Protection (8k Limit Fix)
 cat <<'EOF' > /root/proxy.py
 import http.server
 import urllib.request
@@ -75,13 +75,12 @@ class GitHubProxyHandler(http.server.BaseHTTPRequestHandler):
                     payload["max_completion_tokens"] = 2048
                     modified = True
 
-                # 2. Prune old history to stay under 8,000 tokens limit (preserves system prompt + last 4 messages)
+                # 2. Protection 1: Prune old history to stay under 8,000 tokens limit (preserves system prompt + last 4 messages)
                 if "messages" in payload and isinstance(payload["messages"], list) and len(payload["messages"]) > 6:
                     system_message = None
                     if payload["messages"][0].get("role") == "system":
                         system_message = payload["messages"][0]
                     
-                    # Keep system prompt + last 4 messages (2 turns)
                     last_messages = payload["messages"][-4:]
                     
                     new_messages = []
@@ -91,6 +90,16 @@ class GitHubProxyHandler(http.server.BaseHTTPRequestHandler):
                     
                     payload["messages"] = new_messages
                     modified = True
+                
+                # 3. Protection 2: Cap single massive user message (approx 24,000 chars is roughly 6,000 tokens)
+                if "messages" in payload and isinstance(payload["messages"], list) and len(payload["messages"]) > 0:
+                    latest_msg = payload["messages"][-1]
+                    if latest_msg.get("role") == "user" and isinstance(latest_msg.get("content"), str):
+                        content = latest_msg["content"]
+                        if len(content) > 24000:
+                            print(f"Latest user message of length {len(content)} exceeded safety limits. Truncating...", file=sys.stderr)
+                            latest_msg["content"] = content[:24000] + "\n\n...[Note: This input was extremely large and has been automatically truncated to fit the GitHub Models 8,000 token limit.]"
+                            modified = True
                     
                 if modified:
                     post_data = json.dumps(payload).encode('utf-8')
