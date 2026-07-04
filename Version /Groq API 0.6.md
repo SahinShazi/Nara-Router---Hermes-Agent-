@@ -35,7 +35,7 @@ clean() {
 export TELEGRAM_BOT_TOKEN="$(clean "$TELEGRAM_BOT_TOKEN")"
 export TELEGRAM_ALLOWED_USERS="$(clean "$TELEGRAM_ALLOWED_USERS")"
 
-# 3. Create the custom Python proxy with DYNAMIC Groq API Key Scanning and User-Agent bypass
+# 3. Create the custom Python proxy with Dynamic Key Scanning, User-Agent bypass, and Token Capping
 cat <<'EOF' > /root/proxy.py
 import http.server
 import urllib.request
@@ -68,10 +68,10 @@ for k, v in env_keys.items():
         active_keys.append(v)
 
 if not active_keys:
-    print("Error: No active Groq keys (GROQ_API_KEY_*) found in environment!")
+    print("Error: No active Groq keys (GROQ_API_KEY_*) found in environment!", file=sys.stderr)
     sys.exit(1)
 
-print(f"Custom Groq Proxy initialized with {len(active_keys)} active keys in pool.")
+print(f"Custom Groq Proxy initialized with {len(active_keys)} active keys in pool.", file=sys.stderr)
 current_key_index = 0
 
 class GroqProxyHandler(http.server.BaseHTTPRequestHandler):
@@ -84,6 +84,25 @@ class GroqProxyHandler(http.server.BaseHTTPRequestHandler):
             content_length = int(self.headers['Content-Length'])
             post_data = self.rfile.read(content_length)
             
+            # Intercept and cap max_tokens to prevent Groq HTTP 400 errors
+            try:
+                payload = json.loads(post_data.decode('utf-8'))
+                modified = False
+                
+                # Cap max_tokens to 8192 (perfectly safe within Groq's 32768 limits)
+                if "max_tokens" in payload and isinstance(payload["max_tokens"], int) and payload["max_tokens"] > 8192:
+                    payload["max_tokens"] = 8192
+                    modified = True
+                    
+                if "max_completion_tokens" in payload and isinstance(payload["max_completion_tokens"], int) and payload["max_completion_tokens"] > 8192:
+                    payload["max_completion_tokens"] = 8192
+                    modified = True
+                    
+                if modified:
+                    post_data = json.dumps(payload).encode('utf-8')
+            except Exception as pe:
+                print(f"Payload parsing warning: {pe}", file=sys.stderr)
+
             for attempt in range(len(active_keys)):
                 key_index = (current_key_index + attempt) % len(active_keys)
                 api_key = active_keys[key_index]
@@ -109,17 +128,18 @@ class GroqProxyHandler(http.server.BaseHTTPRequestHandler):
                         current_key_index = key_index
                         return
                 except urllib.error.HTTPError as e:
-                    if e.code in [429, 402, 401, 400]:
-                        print(f"Groq Key {key_index + 1} got HTTP {e.code}. Failover to next key...")
+                    err_msg = e.read().decode('utf-8', errors='ignore')
+                    print(f"Groq Key {key_index + 1} got HTTP {e.code}: {err_msg}", file=sys.stderr)
+                    if e.code in [429, 402, 401, 400, 403]:
                         continue
                     else:
                         self.send_response(e.code)
                         self.send_header("Content-Type", "application/json")
                         self.end_headers()
-                        self.wfile.write(e.read())
+                        self.wfile.write(err_msg.encode('utf-8'))
                         return
                 except Exception as e:
-                    print(f"Groq Key {key_index + 1} connection error: {e}. Trying next...")
+                    print(f"Groq Key {key_index + 1} connection error: {e}", file=sys.stderr)
                     continue
             
             self.send_response(500)
@@ -145,7 +165,7 @@ class GroqProxyHandler(http.server.BaseHTTPRequestHandler):
 def run(port=8001):
     server_address = ('127.0.0.1', port)
     httpd = http.server.HTTPServer(server_address, GroqProxyHandler)
-    print(f"Starting lightweight Groq proxy on port {port}...")
+    print(f"Starting lightweight Groq proxy on port {port}...", file=sys.stderr)
     httpd.serve_forever()
 
 if __name__ == '__main__':

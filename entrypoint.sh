@@ -35,7 +35,7 @@ clean() {
 export TELEGRAM_BOT_TOKEN="$(clean "$TELEGRAM_BOT_TOKEN")"
 export TELEGRAM_ALLOWED_USERS="$(clean "$TELEGRAM_ALLOWED_USERS")"
 
-# 3. Create the custom Python proxy with Dynamic Key Scanning & Real-time Console Debugging
+# 3. Create the custom Python proxy with Dynamic Key Scanning, User-Agent bypass, and Token Capping
 cat <<'EOF' > /root/proxy.py
 import http.server
 import urllib.request
@@ -84,6 +84,25 @@ class GroqProxyHandler(http.server.BaseHTTPRequestHandler):
             content_length = int(self.headers['Content-Length'])
             post_data = self.rfile.read(content_length)
             
+            # Intercept and cap max_tokens to prevent Groq HTTP 400 errors
+            try:
+                payload = json.loads(post_data.decode('utf-8'))
+                modified = False
+                
+                # Cap max_tokens to 8192 (perfectly safe within Groq's 32768 limits)
+                if "max_tokens" in payload and isinstance(payload["max_tokens"], int) and payload["max_tokens"] > 8192:
+                    payload["max_tokens"] = 8192
+                    modified = True
+                    
+                if "max_completion_tokens" in payload and isinstance(payload["max_completion_tokens"], int) and payload["max_completion_tokens"] > 8192:
+                    payload["max_completion_tokens"] = 8192
+                    modified = True
+                    
+                if modified:
+                    post_data = json.dumps(payload).encode('utf-8')
+            except Exception as pe:
+                print(f"Payload parsing warning: {pe}", file=sys.stderr)
+
             for attempt in range(len(active_keys)):
                 key_index = (current_key_index + attempt) % len(active_keys)
                 api_key = active_keys[key_index]
@@ -110,8 +129,7 @@ class GroqProxyHandler(http.server.BaseHTTPRequestHandler):
                         return
                 except urllib.error.HTTPError as e:
                     err_msg = e.read().decode('utf-8', errors='ignore')
-                    # Directly output the exact API error to Render's stderr console logs
-                    print(f"Groq Key {key_index + 1} failed with HTTP {e.code}: {err_msg}", file=sys.stderr)
+                    print(f"Groq Key {key_index + 1} got HTTP {e.code}: {err_msg}", file=sys.stderr)
                     if e.code in [429, 402, 401, 400, 403]:
                         continue
                     else:
