@@ -24,7 +24,7 @@ RUN if [ -f "/usr/local/lib/hermes-agent/venv/bin/python" ]; then \
     elif [ -f "/usr/local/lib/hermes-agent/.venv/bin/python" ]; then \
         uv pip install --python /usr/local/lib/hermes-agent/.venv/bin/python "hermes-agent[telegram]"; \
     else \
-        uv pip install --system "hermes-agent[telegram]"; \
+        uv pip install --system "hermes-agent[all]"; \
     fi
 
 # Copy only entrypoint.sh

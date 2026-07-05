@@ -2,8 +2,6 @@
 set -euo pipefail
 
 mkdir -p /root/.hermes
-mkdir -p /root/.pi/agent/extensions
-mkdir -p /root/.hermes/extensions
 
 SUPABASE_URL="${SUPABASE_URL:-}"
 SUPABASE_KEY="${SUPABASE_KEY:-}"
@@ -26,7 +24,7 @@ if [ -n "${SUPABASE_URL}" ] && [ -n "${SUPABASE_KEY}" ]; then
   fi
 fi
 
-# 2. Setup environment variables and cleanup for Telegram
+# 2. Setup environment variables and cleanup (Supports up to 6 keys)
 OPENROUTER_API_KEY_1="${OPENROUTER_API_KEY_1:-}"
 OPENROUTER_API_KEY_2="${OPENROUTER_API_KEY_2:-}"
 OPENROUTER_API_KEY_3="${OPENROUTER_API_KEY_3:-}"
@@ -195,7 +193,7 @@ if __name__ == '__main__':
     run()
 EOF
 
-# 4. Create the ultimate Python HTTP Reverse Proxy to bind ports 10000, 9119 and 8642
+# 4. Create the ultimate Python HTTP Reverse Proxy (Proxies public port 10000 to internal dashboard port 9119 and API port 8642)
 cat <<'EOF' > /root/reverse_proxy.py
 import http.server
 import urllib.request
@@ -250,8 +248,10 @@ class ReverseProxyHandler(http.server.BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path.startswith("/v1"):
+            # Forward API requests to Hermes API Server on 8642
             self.handle_request(f"http://127.0.0.1:8642{self.path}")
         else:
+            # Forward all other requests to the real official Hermes Dashboard on 9119
             self.handle_request(f"http://127.0.0.1:9119{self.path}")
 
     def do_POST(self):
@@ -347,7 +347,7 @@ fi
 echo "Starting local OpenRouter failover proxy..."
 python3 /root/proxy.py &
 
-# 9. Start Hermes Dashboard internally on port 9119
+# 9. Start the real official Hermes Dashboard internally on port 9119
 echo "Starting Hermes Web Dashboard..."
 /usr/local/bin/hermes dashboard --host 127.0.0.1 --port 9119 &
 
