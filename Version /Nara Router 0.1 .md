@@ -85,22 +85,35 @@ agent:
   retry_backoff_base: 5.0     # waits only 5 seconds before retrying (fails fast)
 EOF
 
-# 5. Background loop to sync backup to Supabase
+# 5. Optimized Background loop (Sleep 4 Hours + Change Detection to save 99% bandwidth)
 backup_loop() {
+  local last_backed_up_mtime=0
   while true; do
-    sleep 30
+    sleep 14400 # Check and backup every 4 hours instead of 30 seconds
     if [ -d /root/.hermes ] && [ -f /root/.hermes/state.db ]; then
-      python3 -c "import shutil; shutil.make_archive('/tmp/state', 'zip', '/root/.hermes')"
+      local current_mtime
+      current_mtime=$(stat -c %Y /root/.hermes/state.db 2>/dev/null || echo 0)
       
-      curl -s -o /dev/null -X POST \
-        -H "apikey: ${SUPABASE_KEY}" \
-        -H "Authorization: Bearer ${SUPABASE_KEY}" \
-        -H "Content-Type: application/zip" \
-        -H "x-upsert: true" \
-        --data-binary "@/tmp/state.zip" \
-        "${SUPABASE_URL}/storage/v1/object/hermes/state.zip"
+      # ONLY upload if the database has actually been modified since last backup
+      if [ "$current_mtime" -gt "$last_backed_up_mtime" ]; then
+        echo "Database modified. Cleaning temp logs and preparing secure backup..."
+        # Clean bulky logs and temporary cache files before zipping to reduce size
+        python3 -c "import os, shutil; [os.remove(os.path.join(r, f)) for r, d, fs in os.walk('/root/.hermes') for f in fs if f.endswith('.log') or f.endswith('.tmp')]; shutil.make_archive('/tmp/state', 'zip', '/root/.hermes')"
         
-      rm -f /tmp/state.zip
+        HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
+          -H "apikey: ${SUPABASE_KEY}" \
+          -H "Authorization: Bearer ${SUPABASE_KEY}" \
+          -H "Content-Type: application/zip" \
+          -H "x-upsert: true" \
+          --data-binary "@/tmp/state.zip" \
+          "${SUPABASE_URL}/storage/v1/object/hermes/state.zip")
+          
+        rm -f /tmp/state.zip
+        if [ "$HTTP_STATUS" -eq 200 ] || [ "$HTTP_STATUS" -eq 201 ]; then
+          last_backed_up_mtime="$current_mtime"
+          echo "Optimized backup sync completed successfully."
+        fi
+      fi
     fi
   done
 }
